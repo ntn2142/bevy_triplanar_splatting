@@ -1,14 +1,17 @@
 use bevy::{
-    image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
+    image::{
+        CompressedImageFormats, ImageAddressMode, ImageFilterMode, ImageLoader, ImageSampler,
+        ImageSamplerDescriptor,
+    },
     // pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
     render::renderer::RenderDevice,
 };
 use bevy_triplanar_splatting::{
-    triplanar_material::{TriplanarMaterial, ATTRIBUTE_MATERIAL_WEIGHTS},
     TriplanarMaterialPlugin,
+    triplanar_material::{ATTRIBUTE_MATERIAL_WEIGHTS, TriplanarMaterial},
 };
-use smooth_bevy_cameras::{controllers::fps::*, LookTransformPlugin};
+use smooth_bevy_cameras::{LookTransformPlugin, controllers::fps::*};
 
 fn main() {
     App::new()
@@ -17,6 +20,7 @@ fn main() {
         // .add_plugin(WireframePlugin::default())
         .add_plugins(LookTransformPlugin)
         .add_plugins(FpsCameraPlugin::default())
+        // .register_asset_loader(ImageLoader::new(CompressedImageFormats::all()))
         .add_systems(Startup, setup)
         .add_systems(Update, (spawn_meshes, move_lights))
         .run();
@@ -37,6 +41,7 @@ fn setup(
 
     // start loading materials
     // TODO: automatically choose textures based on GPU supported features
+
     commands.insert_resource(MaterialHandles {
         base_color: LoadingImage::new(asset_server.load("array_material/albedo.ktx2")),
         occlusion: LoadingImage::new(asset_server.load("array_material/ao.ktx2")),
@@ -44,6 +49,7 @@ fn setup(
         metal_rough: LoadingImage::new(asset_server.load("array_material/metal_rough.ktx2")),
         spawned: false,
     });
+
     // commands.insert_resource(MaterialHandles {
     //     base_color: LoadingImage::new(asset_server.load("array_material/albedo.basis")),
     //     occlusion: LoadingImage::new(asset_server.load("array_material/ao.basis")),
@@ -60,18 +66,15 @@ fn setup(
     // Spawn lights and camera.
     commands.spawn((
         MovingLight,
-        PointLightBundle {
-            point_light: PointLight {
-                intensity: 50000.,
-                range: 100.,
-                ..default()
-            },
+        PointLight {
+            intensity: 50000.,
+            range: 100.,
             ..default()
         },
     ));
 
     commands
-        .spawn(Camera3dBundle::default())
+        .spawn(Camera3d::default())
         .insert(FpsCameraBundle::new(
             FpsCameraController {
                 translate_sensitivity: 8.0,
