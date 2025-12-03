@@ -8,7 +8,7 @@
   };
 
   outputs =
-    inputs@{
+    {
       self,
       nixpkgs,
       rust-overlay,
@@ -19,15 +19,23 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
+        rust-latest = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [
+            "rust-analyzer"
+            "rust-src"
+          ];
+        };
       in
       {
-        devShells.default = pkgs.mkShell rec {
+        devShells.default = pkgs.mkShell {
 
           buildInputs =
             with pkgs;
             [
+              nodePackages.prettier
+              wgsl-analyzer
               # Rust
-              (rust-bin.stable.latest.default.override { extensions = [ "rust-src" ]; })
+              rust-latest
               pkg-config
             ]
             ++ lib.optionals (lib.strings.hasInfix "linux" system) [

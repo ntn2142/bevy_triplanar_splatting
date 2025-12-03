@@ -1,11 +1,15 @@
 use bevy::{
+    asset::RenderAssetUsages,
     image::{
         CompressedImageFormats, ImageAddressMode, ImageFilterMode, ImageLoader, ImageSampler,
         ImageSamplerDescriptor,
     },
-    // pbr::wireframe::{WireframeConfig, WireframePlugin},
+    log,
     prelude::*,
-    render::renderer::RenderDevice,
+    render::{
+        render_resource::{Extent3d, TextureDimension},
+        renderer::RenderDevice,
+    },
 };
 use bevy_triplanar_splatting::{
     TriplanarMaterialPlugin,
@@ -42,13 +46,23 @@ fn setup(
     // start loading materials
     // TODO: automatically choose textures based on GPU supported features
 
+    // TODO: load some textures and run
+    // let t = LoadingImageArray::<4>::new([]);
     commands.insert_resource(MaterialHandles {
-        base_color: LoadingImage::new(asset_server.load("array_material/albedo.ktx2")),
-        occlusion: LoadingImage::new(asset_server.load("array_material/ao.ktx2")),
-        normal_map: LoadingImage::new(asset_server.load("array_material/normal.ktx2")),
-        metal_rough: LoadingImage::new(asset_server.load("array_material/metal_rough.ktx2")),
+        base_color: LoadingImageArray::new([], &asset_server),
+        occlusion: LoadingImageArray::new([], &asset_server),
+        normal_map: LoadingImageArray::new([], &asset_server),
+        metal_rough: LoadingImageArray::new([], &asset_server),
         spawned: false,
     });
+
+    // commands.insert_resource(MaterialHandles {
+    //     base_color: LoadingImage::new(asset_server.load("array_material/albedo.ktx2")),
+    //     occlusion: LoadingImage::new(asset_server.load("array_material/ao.ktx2")),
+    //     normal_map: LoadingImage::new(asset_server.load("array_material/normal.ktx2")),
+    //     metal_rough: LoadingImage::new(asset_server.load("array_material/metal_rough.ktx2")),
+    //     spawned: false,
+    // });
 
     // commands.insert_resource(MaterialHandles {
     //     base_color: LoadingImage::new(asset_server.load("array_material/albedo.basis")),
@@ -96,31 +110,86 @@ fn move_lights(time: Res<Time>, mut lights: Query<(&MovingLight, &mut Transform)
     }
 }
 
+struct LoadingImageArray<const n: usize> {
+    images: [LoadingImage; n],
+}
+
+impl<const N: usize> LoadingImageArray<N> {
+    fn new(paths: [&str; N], asset_server: &AssetServer) -> Self {
+        let arr = paths.map(|path| LoadingImage::new(asset_server.load(path)));
+        Self { images: arr }
+    }
+    fn check_any_loaded(&mut self, created_handle: &AssetId<Image>) -> bool {
+        self.images
+            .iter_mut()
+            .any(|im| im.check_loaded(created_handle))
+    }
+    fn all_loaded(&self) -> bool {
+        self.images.iter().all(|im| im.loaded)
+    }
+
+    fn merge_images(self, assets: &mut Assets<Image>) -> Handle<Image> {
+        let images = self.images.map(|im| assets.get(im.handle.id()).unwrap());
+        let mut size = images[0].texture_descriptor.size;
+        let format = images[0].texture_descriptor.format;
+        let usage = images[0].asset_usage;
+        if N >= 2 {
+            let all_match = images[1..].iter().all(|im| {
+                let s = im.texture_descriptor.size;
+                let f = im.texture_descriptor.format;
+                s.width == size.width
+                    && s.height == size.height
+                    && f == format
+                    && im.asset_usage == usage
+            });
+            if !all_match {
+                log::error!("size or format dont match");
+                panic!()
+            }
+        }
+
+        let mut new_data = Vec::with_capacity(
+            images
+                .iter()
+                .map(|im| im.data.as_ref().unwrap().len())
+                .sum(),
+        );
+        images
+            .iter()
+            .for_each(|im| new_data.extend_from_slice(im.data.as_ref().unwrap().as_slice()));
+
+        size.height *= N as u32;
+        size.depth_or_array_layers = 1;
+        let new = Image::new_fill(size, TextureDimension::D2, &new_data, format, usage);
+        assets.add(new)
+    }
+}
+
 #[derive(Resource)]
-struct MaterialHandles {
-    base_color: LoadingImage,
-    occlusion: LoadingImage,
-    normal_map: LoadingImage,
-    metal_rough: LoadingImage,
+struct MaterialHandles<const N: usize> {
+    base_color: LoadingImageArray<N>,
+    occlusion: LoadingImageArray<N>,
+    normal_map: LoadingImageArray<N>,
+    metal_rough: LoadingImageArray<N>,
     spawned: bool,
 }
 
-impl MaterialHandles {
+impl<const N: usize> MaterialHandles<N> {
     fn all_loaded(&self) -> bool {
-        self.base_color.loaded
-            && self.occlusion.loaded
-            && self.normal_map.loaded
-            && self.metal_rough.loaded
+        self.base_color.all_loaded()
+            && self.occlusion.all_loaded()
+            && self.normal_map.all_loaded()
+            && self.metal_rough.all_loaded()
     }
 
     fn check_loaded(&mut self, created_handle: &AssetId<Image>) -> bool {
         // Check every handle without short circuiting because they might be
         // duplicates.
         let mut any_loaded = false;
-        any_loaded |= self.base_color.check_loaded(created_handle);
-        any_loaded |= self.occlusion.check_loaded(created_handle);
-        any_loaded |= self.normal_map.check_loaded(created_handle);
-        any_loaded |= self.metal_rough.check_loaded(created_handle);
+        any_loaded |= self.base_color.check_any_loaded(created_handle);
+        any_loaded |= self.occlusion.check_any_loaded(created_handle);
+        any_loaded |= self.normal_map.check_any_loaded(created_handle);
+        any_loaded |= self.metal_rough.check_any_loaded(created_handle);
         any_loaded
     }
 }
@@ -165,6 +234,7 @@ fn spawn_meshes(
             if !handles.check_loaded(&id) {
                 continue;
             }
+            // if any of our textures load do this
 
             let texture = assets.get_mut(id).unwrap();
             texture.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
